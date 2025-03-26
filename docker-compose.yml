@@ -3,8 +3,8 @@ services:
     build: .
     ports:
       - "8000:8000"
-    environment:
-      - GEMINI_API_KEYS=AIzaSyA2Tz1WCL9JIUqYVIOU8dHXJo2kJZ2ugMQ
+    env_file:
+      - .env
     volumes:
       - ./:/app
     restart: unless-stopped
