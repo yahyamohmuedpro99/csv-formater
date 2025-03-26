@@ -1,12 +1,23 @@
 from fastapi import FastAPI, UploadFile, File
+import logging
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 import shutil
 from pathlib import Path
 import asyncio
-from ai_csv_transformer import process_contacts, read_csv_file_async
+from ai_csv_transformer import process_contacts, read_csv_file_async, get_file_paths, ensure_directories
 from datetime import datetime
 from csv_transformer import transform_for_listmonk
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('app.log')
+    ]
+)
 
 app = FastAPI()
 
@@ -18,7 +29,7 @@ HTML_TEMPLATE = """
     <title>CSV File Processor</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 40px; }
-        .container { max-width: 600px; margin: 0 auto; }
+        .container { max-width: 800px; margin: 0 auto; }
         .upload-form { 
             border: 2px dashed #ccc; 
             padding: 20px; 
@@ -42,9 +53,8 @@ HTML_TEMPLATE = """
         }
         .download-link {
             display: inline-block;
-            margin-top: 20px;
-            margin-right: 10px;
-            padding: 10px 20px;
+            margin: 5px;
+            padding: 5px 10px;
             background-color: #4CAF50;
             color: white;
             text-decoration: none;
@@ -53,31 +63,32 @@ HTML_TEMPLATE = """
         .download-link:hover {
             background-color: #45a049;
         }
-        #downloads {
+        #downloads, #dashboard {
             margin-top: 20px;
-            text-align: center;
+            text-align: left;
+        }
+        .dashboard-title {
+            margin-top: 30px;
+            border-bottom: 2px solid #ccc;
+            padding-bottom: 10px;
+        }
+        .file-list {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        .file-list th, .file-list td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        .file-list tr:hover {
+            background-color: #f5f5f5;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>CSV File Processor</h1>
-        <div class="upload-form">
-            <form id="uploadForm" enctype="multipart/form-data">
-                <input type="file" name="file" accept=".csv" required>
-                <button type="submit">Process File</button>
-            </form>
-        </div>
-        <div id="progressBar">
-            <div></div>
-        </div>
-        <div id="status" class="status"></div>
-        <div id="downloads" style="display: none;">
-            <a id="downloadLink" class="download-link" href="#">
-                <i class="fas fa-download"></i> Download Processed File
-            </a>
-            <a id="downloadLinkListmonk" class="download-link" href="#">
-                <i class="fas fa-download"></i> Download ListMonk Format
             </a>
         </div>
     </div>
@@ -104,17 +115,26 @@ HTML_TEMPLATE = """
                 
                 const result = await response.json();
                 progressDiv.style.width = '100%';
-                status.textContent = `Processing complete! ${result.message}`;
                 
-                // Show download links
-                downloads.style.display = 'block';
-                document.getElementById('downloadLink').href = `/download/${result.filename}`;
-                document.getElementById('downloadLink').style.display = 'inline-block';
-                document.getElementById('downloadLinkListmonk').href = `/download/${result.listmonk_filename}`;
-                document.getElementById('downloadLinkListmonk').style.display = 'inline-block';
+                if (response.ok) {
+                    status.textContent = `Processing complete! ${result.message}`;
+                    
+                    // Show download links
+                    downloads.style.display = 'block';
+                    document.getElementById('downloadLink').href = `/download/${result.filename}`;
+                    document.getElementById('downloadLink').style.display = 'inline-block';
+                    document.getElementById('downloadLinkListmonk').href = `/download/${result.listmonk_filename}`;
+                    document.getElementById('downloadLinkListmonk').style.display = 'inline-block';
+                } else {
+                    // Server returned an error
+                    status.textContent = `Error: ${result.message || result.error || 'Unknown error'}`;
+                    progressDiv.style.backgroundColor = '#ff0000';
+                    downloads.style.display = 'none';
+                }
             } catch (error) {
                 status.textContent = 'Error processing file: ' + error;
                 progressDiv.style.backgroundColor = '#ff0000';
+                downloads.style.display = 'none';
             }
         };
     </script>
@@ -128,15 +148,21 @@ async def read_root():
 
 @app.post("/upload/")
 async def upload_file(file: UploadFile = File(...)):
+    # Define temp_file outside try block so it's available in except block
+    temp_file = None
     try:
+        # Ensure directories exist
+        paths = get_file_paths()
+        ensure_directories()
+        
         # Create timestamp and unique filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         original_name = Path(file.filename).stem
         
         # Save uploaded file with timestamp
-        temp_file = Path(f"temp_{timestamp}_{original_name}.csv")
-        output_file = Path(f"processed_{timestamp}_{original_name}.csv")
-        listmonk_file = Path(f"listmonk_{timestamp}_{original_name}.csv")
+        temp_file = paths['uploads'] / f"temp_{timestamp}_{original_name}.csv"
+        output_file = paths['processed'] / f"processed_{timestamp}_{original_name}.csv"
+        listmonk_file = paths['listmonk'] / f"listmonk_{timestamp}_{original_name}.csv"
         
         with temp_file.open("wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
@@ -149,7 +175,8 @@ async def upload_file(file: UploadFile = File(...)):
         await transform_for_listmonk(output_file, listmonk_file)
         
         # Clean up temp file
-        temp_file.unlink()
+        if temp_file.exists():
+            temp_file.unlink()
         
         return JSONResponse({
             "message": f"File processed successfully. Total: {processed}, Successful: {successful}, Failed: {processed - successful}",
@@ -158,18 +185,29 @@ async def upload_file(file: UploadFile = File(...)):
         })
     
     except Exception as e:
-        if temp_file.exists():
+        import traceback
+        logging.error(traceback.format_exc())
+        if temp_file and temp_file.exists():
             temp_file.unlink()
         return JSONResponse({
-            "error": str(e)
+            "error": str(e),
+            "message": f"Error processing file: {str(e)}"
         }, status_code=500)
 
 @app.get("/download/{filename}")
 async def download_file(filename: str):
-    file_path = Path(filename)
+    # Determine which directory to look in based on filename prefix
+    paths = get_file_paths()
+    if filename.startswith("processed_"):
+        file_path = paths['processed'] / filename
+    elif filename.startswith("listmonk_"):
+        file_path = paths['listmonk'] / filename
+    else:
+        file_path = paths['uploads'] / filename
+    
     if not file_path.exists():
         return JSONResponse({
-            "error": "File not found"
+            "error": f"File not found: {file_path}"
         }, status_code=404)
     
     return FileResponse(

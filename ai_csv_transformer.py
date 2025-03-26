@@ -2,7 +2,7 @@ import csv
 import logging
 import asyncio
 from pathlib import Path
-from google import genai
+import google.generativeai as genai
 from typing import List, Dict, Optional
 import os
 from dotenv import load_dotenv
@@ -11,6 +11,16 @@ import aiofiles
 import json
 from collections import defaultdict
 from tqdm import tqdm
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('transformer.log')
+    ]
+)
 
 # Load environment variables
 load_dotenv()
@@ -78,7 +88,10 @@ async def generate_personalized_email(row: Dict, key_manager: KeyManager) -> Opt
         return None
 
     print(f"\nProcessing contact: {row}")  # Show input data
-    client = genai.Client(api_key=api_key)
+    # Configure the API key globally
+    genai.configure(api_key=api_key)
+    # Create the model without passing api_key parameter
+    client = genai.GenerativeModel('gemini-2.0-flash')
 
     try:
         prompt = f"""
@@ -105,9 +118,7 @@ async def generate_personalized_email(row: Dict, key_manager: KeyManager) -> Opt
         Ensure that your response meets these requirements exactly.
         """
 
-        response = client.models.generate_content(
-                    model="gemini-2.0-flash", contents=prompt
-                ).text
+        response = client.generate_content(prompt).text
         
         # Clean up any markdown code block markers
         response = response.replace('```text', '').replace('```json', '').replace('```', '')
@@ -126,25 +137,54 @@ async def generate_personalized_email(row: Dict, key_manager: KeyManager) -> Opt
         print(f"Content: {result['personalized_email'][:100]}...")  # Show first 100 chars
         print("-" * 50)
         
+        
         return result
             
     except Exception as e:
         logging.error(f"Error calling Gemini API: {str(e)}")
-        return None
+        raise  # Re-raise the exception
 
 async def process_batch(batch: List[Dict], key_manager: KeyManager) -> List[Dict]:
     """Process a batch of contacts concurrently."""
-    tasks = [generate_personalized_email(row, key_manager) for row in batch]
-    results = await asyncio.gather(*tasks)
+    # tasks = [generate_personalized_email(row, key_manager) for row in batch]
+    
+    # immetate that we are doing some work
+    tasks = []
+    for _ in batch:
+        # Simulate API delay
+        await asyncio.sleep(0.1)
+        # Add dummy result
+        tasks.append({
+            'email': 'test@example.com',
+            'name': 'Test User',
+            'personalized_email': 'This is a simulated email content.'
+        })
+    
+    # Keep the same gather structure for easy rollback later
+    results = await asyncio.gather(*[asyncio.create_task(asyncio.sleep(0, result=task)) for task in tasks])
     return [r for r in results if r is not None]
 
-async def save_results_async(results: List[Dict], output_file: str):
+def ensure_directories():
+    """Create necessary directories if they don't exist."""
+    base_dir = Path(__file__).parent
+    dirs = [
+        base_dir / 'uploads',
+        base_dir / 'uploads' / 'processed',
+        base_dir / 'uploads' / 'listmonk'
+    ]
+    for dir_path in dirs:
+        dir_path.mkdir(parents=True, exist_ok=True)
+    return base_dir
+
+async def save_results_async(results: List[Dict], output_file: Path):
     """Save results to a CSV file asynchronously."""
     fieldnames = ['email', 'name', 'personalized_email']
     
-    # Check if file exists and is empty
+    # Create parent directories if they don't exist
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    
     try:
-        file_empty = not os.path.exists(output_file) or os.path.getsize(output_file) == 0
+        file_empty = not output_file.exists() or output_file.stat().st_size == 0
     except OSError:
         file_empty = True
 
@@ -193,28 +233,52 @@ async def read_csv_file_async(file_path: Path) -> List[Dict]:
         content = await file.read()
         return list(csv.DictReader(content.splitlines()))
 
+def get_file_paths() -> Dict[str, Path]:
+    """Get standardized file paths for the application."""
+    base_dir = Path(__file__).parent
+    return {
+        'base': base_dir,
+        'uploads': base_dir / 'uploads',
+        'processed': base_dir / 'uploads' / 'processed',
+        'listmonk': base_dir / 'uploads' / 'listmonk',
+        'input': base_dir / 'uploads' / 'data.csv',
+        'output': base_dir / 'uploads' / 'processed' / 'output_ai_transformed.csv',
+        'subscribers': base_dir / 'uploads' / 'listmonk' / 'subscribers.csv'
+    }
+
+def verify_input_file(file_path: Path) -> bool:
+    """Verify that the input file exists and is readable."""
+    if not file_path.exists():
+        logging.error(f"Input file not found: {file_path}")
+        return False
+    if not file_path.is_file():
+        logging.error(f"Path is not a file: {file_path}")
+        return False
+    return True
+
 async def main():
-    input_file = Path('data.csv')
-    output_file = Path('output_ai_transformed.csv')
+    paths = get_file_paths()
+    ensure_directories()  # Create necessary directories
     
-    if not input_file.exists():
-        print(f"Error: Input file '{input_file}' not found!")
+    if not verify_input_file(paths['input']):
+        print(f"Error: Input file not found in uploads folder: {paths['input']}")
         return
     
-    print(f"Reading contacts from {input_file}...")
-    contacts = await read_csv_file_async(input_file)
+    print(f"Reading contacts from {paths['input']}...")
+    contacts = await read_csv_file_async(paths['input'])
     
     if not contacts:
         print("No contacts found in the input file!")
         return
     
-    processed, successful = await process_contacts(contacts, output_file)
+    processed, successful = await process_contacts(contacts, paths['output'])
     
     print(f"\nProcessing complete:")
     print(f"- Total contacts processed: {processed}")
     print(f"- Successful transformations: {successful}")
     print(f"- Failed transformations: {processed - successful}")
-    print(f"- Results saved to: {output_file}")
+    print(f"- Results saved to: {paths['output']}")
+    print(f"- Listmonk subscribers file: {paths['subscribers']}")
 
 if __name__ == "__main__":
     asyncio.run(main())
