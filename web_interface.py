@@ -89,10 +89,43 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="container">
+        <h1>CSV File Processor</h1>
+        <div class="upload-form">
+            <form id="uploadForm" enctype="multipart/form-data">
+                <input type="file" name="file" accept=".csv" required>
+                <button type="submit">Process File</button>
+            </form>
+        </div>
+        <div id="progressBar">
+            <div></div>
+        </div>
+        <div id="status" class="status"></div>
+        <div id="downloads" style="display: none;">
+            <a id="downloadLink" class="download-link" href="#">
+                <i class="fas fa-download"></i> Download Processed File
             </a>
+            <a id="downloadLinkListmonk" class="download-link" href="#">
+                <i class="fas fa-download"></i> Download ListMonk Format
+            </a>
+        </div>
+        <div id="dashboard">
+            <h2 class="dashboard-title">Previously Processed Files</h2>
+            <table class="file-list">
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>Original Name</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="fileList">
+                    <!-- Files will be listed here -->
+                </tbody>
+            </table>
         </div>
     </div>
     <script>
+        // Existing upload form handler
         document.getElementById('uploadForm').onsubmit = async (e) => {
             e.preventDefault();
             
@@ -137,6 +170,34 @@ HTML_TEMPLATE = """
                 downloads.style.display = 'none';
             }
         };
+
+        // Add function to load file list
+        async function loadFileList() {
+            try {
+                const response = await fetch('/files/');
+                const files = await response.json();
+                const fileList = await document.getElementById('fileList');
+                fileList.innerHTML = '';
+
+                files.forEach(file => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${file.timestamp}</td>
+                        <td>${file.original_name}</td>
+                        <td>
+                            <a href="/download/${file.processed_file}" class="download-link">Processed</a>
+                            <a href="/download/${file.listmonk_file}" class="download-link">ListMonk</a>
+                        </td>
+                    `;
+                    fileList.appendChild(row);
+                });
+            } catch (error) {
+                console.error('Error loading file list:', error);
+            }
+        }
+
+        // Load file list on page load and after successful upload
+        loadFileList();
     </script>
 </body>
 </html>
@@ -193,6 +254,38 @@ async def upload_file(file: UploadFile = File(...)):
             "error": str(e),
             "message": f"Error processing file: {str(e)}"
         }, status_code=500)
+
+@app.get("/files/")
+async def get_files():
+    paths = get_file_paths()
+    processed_files = list(paths['processed'].glob("processed_*.csv"))
+    
+    files = []
+    for proc_file in processed_files:
+        # Extract timestamp and original name
+        parts = proc_file.stem.split('_', 2)  # Split into ['processed', 'timestamp', 'original_name']
+        if len(parts) >= 3:
+            timestamp = parts[1]
+            original_name = parts[2]
+            listmonk_file = f"listmonk_{timestamp}_{original_name}.csv"
+            
+            # Format timestamp for display
+            try:
+                dt = datetime.strptime(timestamp, "%Y%m%d_%H%M%S")
+                formatted_timestamp = dt.strftime("%Y-%m-%d %H:%M:%S")
+            except:
+                formatted_timestamp = timestamp
+
+            files.append({
+                "timestamp": formatted_timestamp,
+                "original_name": original_name,
+                "processed_file": proc_file.name,
+                "listmonk_file": listmonk_file
+            })
+    
+    # Sort files by timestamp (newest first)
+    files.sort(key=lambda x: x["timestamp"], reverse=True)
+    return files
 
 @app.get("/download/{filename}")
 async def download_file(filename: str):
