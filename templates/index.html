@@ -78,6 +78,7 @@
         <div id="downloads" style="display: none;">
             <div class="listmonk-form" style="margin-bottom: 20px;">
                 <h3>Push to Listmonk</h3>
+                <div id="listmonkServerStatus" style="margin-bottom: 10px; padding: 5px; border-radius: 3px;"></div>
                 <input type="text" id="listName" placeholder="Enter list name" class="form-input">
                 <select id="listType" class="form-input">
                     <option value="private">Private</option>
@@ -88,6 +89,7 @@
                     <option value="double">Double Opt-in</option>
                 </select>
                 <button id="pushToListmonk" class="download-link">Push to Listmonk</button>
+                <button id="checkListmonkStatus" class="download-link" style="background-color: #6c757d;">Check Server Status</button>
                 <div id="listmonkStatus"></div>
             </div>
             <a id="downloadLink" class="download-link" href="#">

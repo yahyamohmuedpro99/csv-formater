@@ -28,8 +28,11 @@ logging.basicConfig(
 
 app = FastAPI()
 
+# Set a prefix for all routes
+PREFIX = "/formater"
+
 # Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount(f"{PREFIX}/static", StaticFiles(directory="static"), name="static")
 
 # Configure templates
 templates = Jinja2Templates(directory="templates")
@@ -43,11 +46,48 @@ LISTMONK_AUTH = (LISTMONK_USERNAME, LISTMONK_PASSWORD)
 # Log Listmonk configuration (without sensitive data)
 logging.info(f"Listmonk API URL: {LISTMONK_BASE_URL}")
 
-@app.get("/", response_class=HTMLResponse)
+# Flag to track if Listmonk is available
+listmonk_available = False
+
+async def check_listmonk_availability():
+    """Check if the Listmonk server is available"""
+    global listmonk_available
+    
+    try:
+        async with httpx.AsyncClient(
+            verify=False,
+            timeout=5.0
+        ) as client:
+            # Try to connect to the Listmonk API
+            response = await client.get(
+                f"{LISTMONK_BASE_URL}/api/health",
+                auth=LISTMONK_AUTH
+            )
+            
+            if response.status_code == 200:
+                listmonk_available = True
+                logging.info("Listmonk server is available")
+            else:
+                listmonk_available = False
+                logging.warning(f"Listmonk server returned status code {response.status_code}")
+                
+    except Exception as e:
+        listmonk_available = False
+        logging.warning(f"Listmonk server is not available: {str(e)}")
+    
+    return listmonk_available
+
+# Schedule periodic checks of Listmonk availability
+@app.on_event("startup")
+async def startup_event():
+    # Check Listmonk availability on startup
+    await check_listmonk_availability()
+
+@app.get(f"{PREFIX}/", response_class=HTMLResponse)
 async def read_root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
-@app.post("/upload/")
+@app.post(f"{PREFIX}/upload/")
 async def upload_file(file: UploadFile = File(...)):
     # Define temp_file outside try block so it's available in except block
     temp_file = None
@@ -95,7 +135,7 @@ async def upload_file(file: UploadFile = File(...)):
             "message": f"Error processing file: {str(e)}"
         }, status_code=500)
 
-@app.get("/files/")
+@app.get(f"{PREFIX}/files/")
 async def get_files():
     paths = get_file_paths()
     processed_files = list(paths['processed'].glob("processed_*.csv"))
@@ -127,7 +167,7 @@ async def get_files():
     files.sort(key=lambda x: x["timestamp"], reverse=True)
     return files
 
-@app.get("/download/{filename}")
+@app.get(f"{PREFIX}/download/{{filename}}")
 async def download_file(filename: str):
     # Determine which directory to look in based on filename prefix
     paths = get_file_paths()
@@ -225,8 +265,26 @@ async def make_listmonk_request(method, endpoint, **kwargs):
             await asyncio.sleep(retry_delay_with_jitter)
             retry_delay *= 2  # Exponential backoff
 
-@app.post("/api/listmonk/lists")
+@app.get(f"{PREFIX}/api/listmonk/status")
+async def get_listmonk_status():
+    """Endpoint to check if Listmonk is available"""
+    is_available = await check_listmonk_availability()
+    return {
+        "available": is_available,
+        "url": LISTMONK_BASE_URL
+    }
+
+@app.post(f"{PREFIX}/api/listmonk/lists")
 async def create_listmonk_list(list_data: dict):
+    # Check if Listmonk is available
+    if not listmonk_available and not await check_listmonk_availability():
+        error_msg = f"Listmonk server is not available at {LISTMONK_BASE_URL}. Please check your configuration."
+        logging.error(error_msg)
+        return JSONResponse({
+            "error": error_msg,
+            "server_unavailable": True
+        }, status_code=503)  # Service Unavailable
+    
     try:
         # Log the request for debugging
         logging.info(f"Creating Listmonk list with data: {list_data}")
@@ -264,8 +322,17 @@ async def create_listmonk_list(list_data: dict):
             "error": error_msg
         }, status_code=500)
 
-@app.post("/api/listmonk/import")
+@app.post(f"{PREFIX}/api/listmonk/import")
 async def import_subscribers(params: str = Form(...), filename: str = Form(...)):
+    # Check if Listmonk is available
+    if not listmonk_available and not await check_listmonk_availability():
+        error_msg = f"Listmonk server is not available at {LISTMONK_BASE_URL}. Please check your configuration."
+        logging.error(error_msg)
+        return JSONResponse({
+            "error": error_msg,
+            "server_unavailable": True
+        }, status_code=503)  # Service Unavailable
+    
     paths = get_file_paths()
     file_path = paths['listmonk'] / filename
     
