@@ -25,7 +25,7 @@ logging.basicConfig(
     ]
 )
 
-app = FastAPI()
+app = FastAPI(root_path="/formater")
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
