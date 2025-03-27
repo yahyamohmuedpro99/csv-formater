@@ -14,7 +14,7 @@ document.getElementById('uploadForm').onsubmit = async (e) => {
     downloads.style.display = 'none';
 
     try {
-        const response = await fetch('./upload/', {
+        const response = await fetch('/upload/', {
             method: 'POST',
             body: formData
         });
@@ -27,9 +27,9 @@ document.getElementById('uploadForm').onsubmit = async (e) => {
             
             // Show download links
             downloads.style.display = 'block';
-            document.getElementById('downloadLink').href = `./download/${result.filename}`;
+            document.getElementById('downloadLink').href = `/download/${result.filename}`;
             document.getElementById('downloadLink').style.display = 'inline-block';
-            document.getElementById('downloadLinkListmonk').href = `./download/${result.listmonk_filename}`;
+            document.getElementById('downloadLinkListmonk').href = `/download/${result.listmonk_filename}`;
             document.getElementById('downloadLinkListmonk').style.display = 'inline-block';
         } else {
             status.textContent = `Error: ${result.message || result.error || 'Unknown error'}`;
@@ -46,7 +46,7 @@ document.getElementById('uploadForm').onsubmit = async (e) => {
 // Load file list function
 async function loadFileList() {
     try {
-        const response = await fetch('./files/');
+        const response = await fetch('/files/');
         const files = await response.json();
         const fileList = document.getElementById('fileList');
         fileList.innerHTML = '';
@@ -57,8 +57,8 @@ async function loadFileList() {
                 <td>${file.timestamp}</td>
                 <td>${file.original_name}</td>
                 <td>
-                    <a href="./download/${file.processed_file}" class="download-link">Processed</a>
-                    <a href="./download/${file.listmonk_file}" class="download-link">ListMonk</a>
+                    <a href="/download/${file.processed_file}" class="download-link">Processed</a>
+                    <a href="/download/${file.listmonk_file}" class="download-link">ListMonk</a>
                 </td>
             `;
             fileList.appendChild(row);
@@ -74,7 +74,7 @@ loadFileList();
 // Add Listmonk integration functions
 async function createListmonkList(listData) {
     try {
-        const response = await fetch('./api/listmonk/lists', {
+        const response = await fetch('/api/listmonk/lists', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -101,7 +101,7 @@ async function pushToListmonk(listId, filename) {
         formData.append('params', JSON.stringify(params));
         formData.append('filename', filename);
 
-        const response = await fetch('./api/listmonk/import', {
+        const response = await fetch('/api/listmonk/import', {
             method: 'POST',
             body: formData
         });
