@@ -10,6 +10,11 @@ from ai_csv_transformer import process_contacts, read_csv_file_async, get_file_p
 from datetime import datetime
 from csv_transformer import transform_for_listmonk
 import httpx
+from dotenv import load_dotenv
+import os
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(
@@ -28,8 +33,8 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # Configure templates
 templates = Jinja2Templates(directory="templates")
 
-LISTMONK_BASE_URL = 'https://listmonk.criticalfuturesolutions.net'
-LISTMONK_AUTH = ('adminapi', 'xl2pmm4miYZrfsmpS4TdS6RDEhTGWeRV')
+LISTMONK_BASE_URL = os.getenv('LISTMONK_BASE_URL')
+LISTMONK_AUTH = (os.getenv('LISTMONK_USERNAME'), os.getenv('LISTMONK_PASSWORD'))
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
