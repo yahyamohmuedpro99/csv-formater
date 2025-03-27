@@ -14,7 +14,7 @@ document.getElementById('uploadForm').onsubmit = async (e) => {
     downloads.style.display = 'none';
 
     try {
-        const response = await fetch('/upload/', {
+        const response = await fetch('/formater/upload/', {
             method: 'POST',
             body: formData
         });
@@ -46,7 +46,7 @@ document.getElementById('uploadForm').onsubmit = async (e) => {
 // Load file list function
 async function loadFileList() {
     try {
-        const response = await fetch('/files/');
+        const response = await fetch('/formater/files/');
         const files = await response.json();
         const fileList = document.getElementById('fileList');
         fileList.innerHTML = '';
@@ -74,7 +74,7 @@ loadFileList();
 // Add Listmonk integration functions
 async function createListmonkList(listData) {
     try {
-        const response = await fetch('/api/listmonk/lists', {
+        const response = await fetch('/formater/api/listmonk/lists', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -101,7 +101,7 @@ async function pushToListmonk(listId, filename) {
         formData.append('params', JSON.stringify(params));
         formData.append('filename', filename);
 
-        const response = await fetch('/api/listmonk/import', {
+        const response = await fetch('/formater/api/listmonk/import', {
             method: 'POST',
             body: formData
         });
