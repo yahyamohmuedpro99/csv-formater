@@ -147,7 +147,7 @@ async def create_listmonk_list(list_data: dict):
     async with httpx.AsyncClient(verify=False) as client:  # Disable SSL verification
         try:
             response = await client.post(
-                f"{LISTMONK_BASE_URL}/formater/api/lists",
+                f"{LISTMONK_BASE_URL}/api/lists",
                 json=list_data,
                 auth=LISTMONK_AUTH,
                 timeout=30.0
@@ -174,7 +174,7 @@ async def import_subscribers(params: str = Form(...), filename: str = Form(...))
                 'params': (None, params)
             }
             response = await client.post(
-                f"{LISTMONK_BASE_URL}/formater/api/import/subscribers",
+                f"{LISTMONK_BASE_URL}/api/import/subscribers",
                 files=files,
                 auth=LISTMONK_AUTH,
                 timeout=30.0
