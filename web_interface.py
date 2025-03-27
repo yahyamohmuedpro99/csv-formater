@@ -1,5 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, Form, Request
 import logging
+import json
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -146,6 +147,9 @@ async def download_file(filename: str):
 async def create_listmonk_list(list_data: dict):
     async with httpx.AsyncClient(verify=False) as client:  # Disable SSL verification
         try:
+            # Log the request for debugging
+            logging.info(f"Creating Listmonk list with data: {list_data}")
+            
             response = await client.post(
                 f"{LISTMONK_BASE_URL}/api/lists",
                 json=list_data,
@@ -153,10 +157,35 @@ async def create_listmonk_list(list_data: dict):
                 timeout=30.0
             )
             response.raise_for_status()  # Raise exception for 4XX/5XX status codes
-            return response.json()
+            
+            # Get the response data
+            response_data = response.json()
+            logging.info(f"Listmonk list creation response: {response_data}")
+            
+            # Ensure the response has the expected structure
+            if 'data' not in response_data:
+                # If the response doesn't have a 'data' field, wrap it in one
+                # This ensures consistent structure for the frontend
+                return {"data": response_data}
+            
+            return response_data
         except httpx.HTTPError as e:
+            error_msg = f"Listmonk API error: {str(e)}"
+            logging.error(error_msg)
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    logging.error(f"Error details: {error_detail}")
+                except:
+                    pass
             return JSONResponse({
-                "error": f"Listmonk API error: {str(e)}"
+                "error": error_msg
+            }, status_code=500)
+        except Exception as e:
+            error_msg = f"Unexpected error: {str(e)}"
+            logging.error(error_msg)
+            return JSONResponse({
+                "error": error_msg
             }, status_code=500)
 
 @app.post("/api/listmonk/import")
@@ -165,29 +194,59 @@ async def import_subscribers(params: str = Form(...), filename: str = Form(...))
     file_path = paths['listmonk'] / filename
     
     if not file_path.exists():
-        return JSONResponse({"error": "File not found"}, status_code=404)
+        error_msg = f"File not found: {filename}"
+        logging.error(error_msg)
+        return JSONResponse({"error": error_msg}, status_code=404)
     
+    # Log the import parameters
+    try:
+        params_dict = json.loads(params)
+        logging.info(f"Importing subscribers with params: {params_dict}")
+    except:
+        logging.info(f"Importing subscribers with params: {params}")
+    
+    file_handle = None
     async with httpx.AsyncClient(verify=False) as client:  # Disable SSL verification
         try:
+            file_handle = open(file_path, 'rb')
             files = {
-                'file': ('subscribers.csv', open(file_path, 'rb'), 'text/csv'),
+                'file': ('subscribers.csv', file_handle, 'text/csv'),
                 'params': (None, params)
             }
+            
+            logging.info(f"Sending import request to Listmonk API")
             response = await client.post(
                 f"{LISTMONK_BASE_URL}/api/import/subscribers",
                 files=files,
                 auth=LISTMONK_AUTH,
-                timeout=30.0
+                timeout=60.0  # Increased timeout for large imports
             )
             response.raise_for_status()
-            return response.json()
+            
+            response_data = response.json()
+            logging.info(f"Listmonk import response: {response_data}")
+            return response_data
         except httpx.HTTPError as e:
+            error_msg = f"Listmonk API error: {str(e)}"
+            logging.error(error_msg)
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    logging.error(f"Error details: {error_detail}")
+                except:
+                    pass
             return JSONResponse({
-                "error": f"Listmonk API error: {str(e)}"
+                "error": error_msg
+            }, status_code=500)
+        except Exception as e:
+            error_msg = f"Unexpected error during import: {str(e)}"
+            logging.error(error_msg)
+            return JSONResponse({
+                "error": error_msg
             }, status_code=500)
         finally:
-            if 'file' in files:
-                files['file'][1].close()
+            if file_handle:
+                file_handle.close()
 
 if __name__ == "__main__":
     import uvicorn

@@ -128,11 +128,34 @@ document.getElementById('pushToListmonk').addEventListener('click', async () => 
             optin: optinType
         });
 
+        // Check if listResult has the expected structure
+        if (!listResult) {
+            throw new Error('No response received from server');
+        }
+        
+        if (listResult.error) {
+            throw new Error(listResult.error);
+        }
+        
+        // Handle different response structures
+        let listId;
+        if (listResult.data && listResult.data.id) {
+            // Standard structure: { data: { id: ... } }
+            listId = listResult.data.id;
+        } else if (listResult.id) {
+            // Alternative structure: { id: ... }
+            listId = listResult.id;
+        } else {
+            console.error('Unexpected list creation response:', listResult);
+            throw new Error('Could not determine list ID from server response');
+        }
+
         statusElem.textContent = 'Importing subscribers...';
-        const importResult = await pushToListmonk(listResult.data.id, filename);
+        const importResult = await pushToListmonk(listId, filename);
         
         statusElem.textContent = 'Successfully imported subscribers to Listmonk!';
     } catch (error) {
+        console.error('Listmonk push error:', error);
         statusElem.textContent = `Error: ${error.message}`;
     }
 });
