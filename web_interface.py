@@ -265,7 +265,7 @@ async def make_listmonk_request(method, endpoint, **kwargs):
             await asyncio.sleep(retry_delay_with_jitter)
             retry_delay *= 2  # Exponential backoff
 
-@app.get(f"{PREFIX}/api/listmonk/status")
+@app.get(f"/api/listmonk/status")
 async def get_listmonk_status():
     """Endpoint to check if Listmonk is available"""
     is_available = await check_listmonk_availability()

@@ -145,7 +145,7 @@ async function pushToListmonk(listId, filename) {
 // Function to check if Listmonk server is available
 async function checkListmonkStatus() {
     try {
-        const response = await fetch('/formater/api/listmonk/status');
+        const response = await fetch('/api/listmonk/status');
         const result = await response.json();
         return result.available;
     } catch (error) {
