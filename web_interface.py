@@ -144,7 +144,8 @@ async def download_file(filename: str):
 
 @app.post("/api/listmonk/lists")
 async def create_listmonk_list(list_data: dict):
-    async with httpx.AsyncClient(verify=False) as client:  # Disable SSL verification
+    logging.info(f"Creating Listmonk list with data: {list_data}")
+    async with httpx.AsyncClient(verify=False) as client:
         try:
             response = await client.post(
                 f"{LISTMONK_BASE_URL}/api/lists",
@@ -152,22 +153,29 @@ async def create_listmonk_list(list_data: dict):
                 auth=LISTMONK_AUTH,
                 timeout=30.0
             )
-            response.raise_for_status()  # Raise exception for 4XX/5XX status codes
-            return response.json()
+            response.raise_for_status()
+            response_data = response.json()
+            logging.info(f"Listmonk list creation response: {response_data}")
+            return response_data
         except httpx.HTTPError as e:
+            error_msg = f"Listmonk API error: {str(e)}"
+            logging.error(error_msg)
             return JSONResponse({
-                "error": f"Listmonk API error: {str(e)}"
+                "error": error_msg
             }, status_code=500)
 
 @app.post("/api/listmonk/import")
 async def import_subscribers(params: str = Form(...), filename: str = Form(...)):
+    logging.info(f"Importing subscribers with params: {params}, filename: {filename}")
     paths = get_file_paths()
     file_path = paths['listmonk'] / filename
     
     if not file_path.exists():
-        return JSONResponse({"error": "File not found"}, status_code=404)
+        error_msg = f"File not found: {file_path}"
+        logging.error(error_msg)
+        return JSONResponse({"error": error_msg}, status_code=404)
     
-    async with httpx.AsyncClient(verify=False) as client:  # Disable SSL verification
+    async with httpx.AsyncClient(verify=False) as client:
         try:
             files = {
                 'file': ('subscribers.csv', open(file_path, 'rb'), 'text/csv'),
@@ -180,10 +188,14 @@ async def import_subscribers(params: str = Form(...), filename: str = Form(...))
                 timeout=30.0
             )
             response.raise_for_status()
-            return response.json()
+            response_data = response.json()
+            logging.info(f"Listmonk import subscribers response: {response_data}")
+            return response_data
         except httpx.HTTPError as e:
+            error_msg = f"Listmonk API error: {str(e)}"
+            logging.error(error_msg)
             return JSONResponse({
-                "error": f"Listmonk API error: {str(e)}"
+                "error": error_msg
             }, status_code=500)
         finally:
             if 'file' in files:
