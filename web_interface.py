@@ -1,13 +1,15 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Form, Request
 import logging
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 import shutil
 from pathlib import Path
 import asyncio
 from ai_csv_transformer import process_contacts, read_csv_file_async, get_file_paths, ensure_directories
 from datetime import datetime
 from csv_transformer import transform_for_listmonk
+import httpx
 
 # Configure logging
 logging.basicConfig(
@@ -20,191 +22,18 @@ logging.basicConfig(
 
 app = FastAPI()
 
-# HTML template for the upload page
-HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>CSV File Processor</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 40px; }
-        .container { max-width: 800px; margin: 0 auto; }
-        .upload-form { 
-            border: 2px dashed #ccc; 
-            padding: 20px; 
-            text-align: center; 
-            margin-bottom: 20px;
-        }
-        .status { margin-top: 20px; }
-        #progressBar {
-            width: 100%;
-            height: 20px;
-            background-color: #f0f0f0;
-            border-radius: 10px;
-            display: none;
-        }
-        #progressBar div {
-            height: 100%;
-            background-color: #4CAF50;
-            border-radius: 10px;
-            width: 0%;
-            transition: width 0.5s;
-        }
-        .download-link {
-            display: inline-block;
-            margin: 5px;
-            padding: 5px 10px;
-            background-color: #4CAF50;
-            color: white;
-            text-decoration: none;
-            border-radius: 5px;
-        }
-        .download-link:hover {
-            background-color: #45a049;
-        }
-        #downloads, #dashboard {
-            margin-top: 20px;
-            text-align: left;
-        }
-        .dashboard-title {
-            margin-top: 30px;
-            border-bottom: 2px solid #ccc;
-            padding-bottom: 10px;
-        }
-        .file-list {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 10px;
-        }
-        .file-list th, .file-list td {
-            padding: 8px;
-            text-align: left;
-            border-bottom: 1px solid #ddd;
-        }
-        .file-list tr:hover {
-            background-color: #f5f5f5;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>CSV File Processor</h1>
-        <div class="upload-form">
-            <form id="uploadForm" enctype="multipart/form-data">
-                <input type="file" name="file" accept=".csv" required>
-                <button type="submit">Process File</button>
-            </form>
-        </div>
-        <div id="progressBar">
-            <div></div>
-        </div>
-        <div id="status" class="status"></div>
-        <div id="downloads" style="display: none;">
-            <a id="downloadLink" class="download-link" href="#">
-                <i class="fas fa-download"></i> Download Processed File
-            </a>
-            <a id="downloadLinkListmonk" class="download-link" href="#">
-                <i class="fas fa-download"></i> Download ListMonk Format
-            </a>
-        </div>
-        <div id="dashboard">
-            <h2 class="dashboard-title">Previously Processed Files</h2>
-            <table class="file-list">
-                <thead>
-                    <tr>
-                        <th>Timestamp</th>
-                        <th>Original Name</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="fileList">
-                    <!-- Files will be listed here -->
-                </tbody>
-            </table>
-        </div>
-    </div>
-    <script>
-        // Existing upload form handler
-        document.getElementById('uploadForm').onsubmit = async (e) => {
-            e.preventDefault();
-            
-            const formData = new FormData(e.target);
-            const status = document.getElementById('status');
-            const progressBar = document.getElementById('progressBar');
-            const progressDiv = progressBar.querySelector('div');
-            const downloads = document.getElementById('downloads');
-            
-            status.textContent = 'Uploading and processing file...';
-            progressBar.style.display = 'block';
-            progressDiv.style.width = '50%';
-            downloads.style.display = 'none';
+# Mount static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
-            try {
-                const response = await fetch('/upload/', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                const result = await response.json();
-                progressDiv.style.width = '100%';
-                
-                if (response.ok) {
-                    status.textContent = `Processing complete! ${result.message}`;
-                    
-                    // Show download links
-                    downloads.style.display = 'block';
-                    document.getElementById('downloadLink').href = `/download/${result.filename}`;
-                    document.getElementById('downloadLink').style.display = 'inline-block';
-                    document.getElementById('downloadLinkListmonk').href = `/download/${result.listmonk_filename}`;
-                    document.getElementById('downloadLinkListmonk').style.display = 'inline-block';
-                } else {
-                    // Server returned an error
-                    status.textContent = `Error: ${result.message || result.error || 'Unknown error'}`;
-                    progressDiv.style.backgroundColor = '#ff0000';
-                    downloads.style.display = 'none';
-                }
-            } catch (error) {
-                status.textContent = 'Error processing file: ' + error;
-                progressDiv.style.backgroundColor = '#ff0000';
-                downloads.style.display = 'none';
-            }
-        };
+# Configure templates
+templates = Jinja2Templates(directory="templates")
 
-        // Add function to load file list
-        async function loadFileList() {
-            try {
-                const response = await fetch('/files/');
-                const files = await response.json();
-                const fileList = await document.getElementById('fileList');
-                fileList.innerHTML = '';
-
-                files.forEach(file => {
-                    const row = document.createElement('tr');
-                    row.innerHTML = `
-                        <td>${file.timestamp}</td>
-                        <td>${file.original_name}</td>
-                        <td>
-                            <a href="/download/${file.processed_file}" class="download-link">Processed</a>
-                            <a href="/download/${file.listmonk_file}" class="download-link">ListMonk</a>
-                        </td>
-                    `;
-                    fileList.appendChild(row);
-                });
-            } catch (error) {
-                console.error('Error loading file list:', error);
-            }
-        }
-
-        // Load file list on page load and after successful upload
-        loadFileList();
-    </script>
-</body>
-</html>
-"""
+LISTMONK_BASE_URL = 'https://listmonk.criticalfuturesolutions.net'
+LISTMONK_AUTH = ('adminapi', 'xl2pmm4miYZrfsmpS4TdS6RDEhTGWeRV')
 
 @app.get("/", response_class=HTMLResponse)
-async def read_root():
-    return HTML_TEMPLATE
+async def read_root(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
 
 @app.post("/upload/")
 async def upload_file(file: UploadFile = File(...)):
@@ -307,6 +136,53 @@ async def download_file(filename: str):
         filename=filename,
         media_type='text/csv'
     )
+
+@app.post("/api/listmonk/lists")
+async def create_listmonk_list(list_data: dict):
+    async with httpx.AsyncClient(verify=False) as client:  # Disable SSL verification
+        try:
+            response = await client.post(
+                f"{LISTMONK_BASE_URL}/api/lists",
+                json=list_data,
+                auth=LISTMONK_AUTH,
+                timeout=30.0
+            )
+            response.raise_for_status()  # Raise exception for 4XX/5XX status codes
+            return response.json()
+        except httpx.HTTPError as e:
+            return JSONResponse({
+                "error": f"Listmonk API error: {str(e)}"
+            }, status_code=500)
+
+@app.post("/api/listmonk/import")
+async def import_subscribers(params: str = Form(...), filename: str = Form(...)):
+    paths = get_file_paths()
+    file_path = paths['listmonk'] / filename
+    
+    if not file_path.exists():
+        return JSONResponse({"error": "File not found"}, status_code=404)
+    
+    async with httpx.AsyncClient(verify=False) as client:  # Disable SSL verification
+        try:
+            files = {
+                'file': ('subscribers.csv', open(file_path, 'rb'), 'text/csv'),
+                'params': (None, params)
+            }
+            response = await client.post(
+                f"{LISTMONK_BASE_URL}/api/import/subscribers",
+                files=files,
+                auth=LISTMONK_AUTH,
+                timeout=30.0
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPError as e:
+            return JSONResponse({
+                "error": f"Listmonk API error: {str(e)}"
+            }, status_code=500)
+        finally:
+            if 'file' in files:
+                files['file'][1].close()
 
 if __name__ == "__main__":
     import uvicorn

@@ -81,87 +81,102 @@ class KeyManager:
 
 async def generate_personalized_email(row: Dict, key_manager: KeyManager) -> Optional[Dict]:
     """Generate a personalized email using Gemini AI based on the contact's information."""
-    api_key = key_manager.get_next_available_key()
-    if not api_key:
-        logging.error("No available API keys")
-        return None
+    max_retries = 3
+    retry_delay = 1
 
-    print(f"\nProcessing contact: {row}")  # Show input data
-    # Configure the API key globally
-    genai.configure(api_key=api_key)
-    # Create the model without passing api_key parameter
-    client = genai.GenerativeModel('gemini-2.0-flash')
+    for attempt in range(max_retries):
+        api_key = key_manager.get_next_available_key()
+        if not api_key:
+            logging.error("No available API keys")
+            return None
 
-    try:
-        prompt = f"""
-        Create a personalized email message using the data provided in {row}. The output must be plain text only, formatted exactly as follows:
+        print(f"\nProcessing contact: {row}")
+        genai.configure(api_key=api_key)
+        client = genai.GenerativeModel('gemini-2.0-flash')
 
-        [email] === [name] === [personalized email message]
+        try:
+            prompt = f"""
+            Create a personalized email message using the data provided in {row}. The output must be plain text only, formatted exactly as follows:
 
-        Guidelines:
-        1. Use the actual data provided .
-        2. The email message body should:
-        - Begin with a compliant and engaging tone that subtly incorporates seduction.
-        - Highlight the candidate's relevant experience.
-        - Gradually transition into suggesting potential opportunities.
-        - Then directly ask for a collaboration with our company and ask him for avalibilty so we can discuss more in a meeting .
-        3. The message must be fully completed with no placeholders or template markers (e.g., [Your Name], [Your Position], etc.).
-        4. Do not include a subject line, closing sign-offs (such as "Regards," or "Sincerely"), or any extra characters.
-        5. The message must begin with "Hello" followed by the candidate's name from , with no additional text or greetings (e.g., do not include "Hello Scott," at the very top).
-        6. The final output should strictly use the "===" separator to separate the email address, name, and the personalized email message without any extra formatting.
+            [email] === [name] === [personalized email message]
 
-        Example of expected output format (without the quotation marks):
+            Guidelines:
+            1. Use the actual data provided .
+            2. The email message body should:
+            - Begin with a compliant and engaging tone that subtly incorporates seduction.
+            - Highlight the candidate's relevant experience.
+            - Gradually transition into suggesting potential opportunities.
+            - Then directly ask for a collaboration with our company and ask him for avalibilty so we can discuss more in a meeting .
+            3. The message must be fully completed with no placeholders or template markers (e.g., [Your Name], [Your Position], etc.).
+            4. Do not include a subject line, closing sign-offs (such as "Regards," or "Sincerely"), or any extra characters.
+            5. The message must begin with "Hello" followed by the candidate's name from , with no additional text or greetings (e.g., do not include "Hello Scott," at the very top).
+            6. The final output should strictly use the "===" separator to separate the email address, name, and the personalized email message without any extra formatting.
 
-        scott.ramey@halifax.ca === Scott Ramey === Hello Scott, I noticed your role as Division... [rest of the personalized message]
+            Example of expected output format (without the quotation marks):
 
-        Ensure that your response meets these requirements exactly.
-        """
+            scott.ramey@halifax.ca === Scott Ramey === Hello Scott, I noticed your role as Division... [rest of the personalized message]
 
-        response = client.generate_content(prompt).text
-        
-        # Clean up any markdown code block markers
-        response = response.replace('```text', '').replace('```json', '').replace('```', '')
-        fields = response.strip().split('===')
-        
-        result = {
-            'email': fields[0].strip(),
-            'name': fields[1].strip(),
-            'personalized_email': fields[2].strip()
-        }
-        
-        # Show the generated content
-        print(f"\nGenerated email for {result['name']}:")
-        print("-" * 50)
-        print(f"Email: {result['email']}")
-        print(f"Content: {result['personalized_email'][:100]}...")  # Show first 100 chars
-        print("-" * 50)
-        
-        
-        return result
+            Ensure that your response meets these requirements exactly.
+            """
+
+            response = client.generate_content(prompt).text
             
-    except Exception as e:
-        logging.error(f"Error calling Gemini API: {str(e)}")
-        raise  # Re-raise the exception
+            # Clean up any markdown code block markers
+            response = response.replace('```text', '').replace('```json', '').replace('```', '')
+            fields = response.strip().split('===')
+            
+            result = {
+                'email': fields[0].strip(),
+                'name': fields[1].strip(),
+                'personalized_email': fields[2].strip()
+            }
+            
+            # Show the generated content
+            print(f"\nGenerated email for {result['name']}:")
+            print("-" * 50)
+            print(f"Email: {result['email']}")
+            print(f"Content: {result['personalized_email'][:100]}...")  # Show first 100 chars
+            print("-" * 50)
+            
+            
+            return result
+                
+        except Exception as e:
+            error_msg = str(e)
+            if "429" in error_msg or "quota" in error_msg.lower():
+                # Mark this key as fully used
+                key_manager.key_usage[api_key] = 1500
+                key_manager.save_usage_state()
+                
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)
+                    logging.warning(f"Rate limit hit, waiting {wait_time}s before retry...")
+                    await asyncio.sleep(wait_time)
+                    continue
+            
+            logging.error(f"Error processing contact {row.get('email', 'unknown')}: {error_msg}")
+            return None
+    
+    return None
 
 async def process_batch(batch: List[Dict], key_manager: KeyManager) -> List[Dict]:
     """Process a batch of contacts concurrently."""
-    # tasks = [generate_personalized_email(row, key_manager) for row in batch]
+    results = []
+    for row in batch:
+        try:
+            result = await generate_personalized_email(row, key_manager)
+            if result:
+                results.append(result)
+            else:
+                logging.warning(f"Skipping contact due to error: {row.get('email', 'unknown')}")
+        except Exception as e:
+            logging.error(f"Unexpected error processing contact {row.get('email', 'unknown')}: {str(e)}")
+            continue
+        
+        # Add a small delay between processing to avoid overwhelming the API
+        await asyncio.sleep(0.5)
     
-    # immetate that we are doing some work
-    tasks = []
-    for _ in batch:
-        # Simulate API delay
-        await asyncio.sleep(0.1)
-        # Add dummy result
-        tasks.append({
-            'email': 'test@example.com',
-            'name': 'Test User',
-            'personalized_email': 'This is a simulated email content.'
-        })
-    
-    # Keep the same gather structure for easy rollback later
-    results = await asyncio.gather(*[asyncio.create_task(asyncio.sleep(0, result=task)) for task in tasks])
-    return [r for r in results if r is not None]
+    return results
 
 def ensure_directories():
     """Create necessary directories if they don't exist."""
