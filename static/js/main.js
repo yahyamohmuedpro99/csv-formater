@@ -100,18 +100,22 @@ async function createListmonkList(listData) {
 async function pushToListmonk(listId, filename) {
     console.log('Pushing to Listmonk with listId:', listId, 'filename:', filename);
     try {
-        const params = {
+        const formData = new FormData();
+        formData.append('mode', 'subscribe');
+        formData.append('subscription_status', 'confirmed');
+        formData.append('delim', ',');
+        formData.append('lists', JSON.stringify([listId]));
+        formData.append('overwrite', 'true');
+        formData.append('filename', filename);
+        
+        console.log('Import parameters:', {
             mode: 'subscribe',
             subscription_status: 'confirmed',
             delim: ',',
-            lists: [listId],
-            overwrite: true
-        };
-        console.log('Import parameters:', params);
-
-        const formData = new FormData();
-        formData.append('params', JSON.stringify(params));
-        formData.append('filename', filename);
+            lists: JSON.stringify([listId]),
+            overwrite: 'true',
+            filename: filename
+        });
 
         const response = await fetch('/formater/api/listmonk/import', {
             method: 'POST',

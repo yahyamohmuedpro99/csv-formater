@@ -165,11 +165,19 @@ async def create_listmonk_list(list_data: dict):
             }, status_code=500)
 
 @app.post("/api/listmonk/import")
-async def import_subscribers(params: str = Form(...), filename: str = Form(...)):
-    logging.info(f"Importing subscribers with params: {params}, filename: {filename}")
+async def import_subscribers(
+    mode: str = Form(...),
+    subscription_status: str = Form(...),
+    delim: str = Form(...),
+    lists: str = Form(...),
+    overwrite: str = Form(...),
+    filename: str = Form(...)
+):
+    logging.info(f"Importing subscribers with mode: {mode}, subscription_status: {subscription_status}, lists: {lists}, filename: {filename}")
     paths = get_file_paths()
     file_path = paths['listmonk'] / filename
     
+    logging.info(f"Expected file path: {file_path}")
     if not file_path.exists():
         error_msg = f"File not found: {file_path}"
         logging.error(error_msg)
@@ -177,13 +185,19 @@ async def import_subscribers(params: str = Form(...), filename: str = Form(...))
     
     async with httpx.AsyncClient(verify=False) as client:
         try:
-            files = {
+            form_data = {
                 'file': ('subscribers.csv', open(file_path, 'rb'), 'text/csv'),
-                'params': (None, params)
+                'mode': (None, mode),
+                'subscription_status': (None, subscription_status),
+                'delim': (None, delim),
+                'lists': (None, lists),
+                'overwrite': (None, overwrite)
             }
+            
+            logging.info(f"Sending form data to Listmonk: {form_data}")
             response = await client.post(
                 f"{LISTMONK_BASE_URL}/api/import/subscribers",
-                files=files,
+                files=form_data,
                 auth=LISTMONK_AUTH,
                 timeout=30.0
             )
@@ -198,8 +212,8 @@ async def import_subscribers(params: str = Form(...), filename: str = Form(...))
                 "error": error_msg
             }, status_code=500)
         finally:
-            if 'file' in files:
-                files['file'][1].close()
+            if 'file' in form_data:
+                form_data['file'][1].close()
 
 if __name__ == "__main__":
     import uvicorn
